@@ -1,0 +1,66 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use FindBin qw( $RealBin );
+
+map{ chomp  $_}my @node = `cat $RealBin/RE/Fail 2>/dev/null`;
+my ( $i, $count ) = ( 0, scalar @node );
+
+my %conf;
+map{
+    chomp $_;
+    $conf{$1} = $2 if $_ =~ /^\s*([^:]+)\s*:\s*(.+)\s*$/;
+}`cat $RealBin/my.config`;
+map{ die "$_ undef" unless $conf{$_} }qw( ssh password user );
+
+
+map{ chomp  $_}my @succ = `cat $RealBin/RE/Success 2>/dev/null`;
+my %succ = map{ $_ => 1 }@succ;
+
+my %fail = (
+    'Network unreachable' => 'Fail.NetworkUnreachable',
+    'Connection timed out' => 'Fail.ConnectionTimedOut',
+    'Permission denied' => 'Fail.PermissionDenied',
+    'Connection refused' => 'Fail.ConnectionRefused',
+);
+
+for my $node ( @node )
+{
+    $i ++;
+
+    print '#' x 75, " $i/$count\nnode: $node\n";
+
+    if( $succ{$node} )
+    {
+        print "node is successed! skip.\n";
+        next;
+    }
+
+    my $check = `sshpass -p "$conf{password}" ssh $conf{user}\@$node "echo OOKK"`;
+    print $check;
+    if( $check =~ /OOKK/ )
+    {
+        print "node is ok! skip!\n";
+        system "echo $node >> $RealBin/RE/Success";
+        next;
+    }
+
+    system( "$conf{ssh} $node  \"sudo sed -i 's/^PermitRootLogin no/#PermitRootLogin no/' /etc/ssh/sshd_config; sudo sed -i 's/^PermitRootLogin without-password/#PermitRootLogin without-password/' /etc/ssh/sshd_config; sudo /etc/init.d/sshd restart || sudo service sshd restart\"" ) if $conf{user} eq 'root';
+
+    my $x = `$conf{ssh} $node  "echo '$conf{password}' | sudo passwd --stdin $conf{user}" 2>&1`;
+    print "$x\n";
+
+    map{
+        if( $x =~ /$_/ )
+        {
+            system "echo $node >> $RealBin/RE/$fail{$_}";
+            next;
+        }
+    }keys %fail;
+
+    my $c = `sshpass -p "$conf{password}" ssh $conf{user}\@$node "echo OOKK"`;
+    print $c;
+
+    die "chpasswd fail" unless $c =~ /OOKK/;
+    system( "echo $node >> $RealBin/RE/Success" );
+}

@@ -1,0 +1,77 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use FindBin qw( $RealBin );
+
+
+map{ chomp  $_}my @node = `cat $RealBin/node.list 2>/dev/null`;
+my ( $i, $count ) = ( 0, scalar @node );
+
+my $opt = int( 1 + $count / 32 );
+
+my ( $cap, $id ) = @ARGV;
+
+exec "$0 $opt" unless $cap && $cap =~ /^\d+$/;
+exit 1 if $id && $id !~ /^\d+$/;
+
+my %conf;
+map{
+    chomp $_;
+    $conf{$1} = $2 if $_ =~ /^\s*([^:]+)\s*:\s*(.+)\s*$/;
+}`cat $RealBin/my.config`;
+map{ die "$_ undef" unless $conf{$_} }qw( ssh password user );
+
+unless( $id )
+{
+    system( "mkdir '$RealBin/RE'" ) unless -d "$RealBin/RE";
+    system( "rm -f $RealBin/RE/Fail*" );
+    my $len = int( $count / $cap );
+    $len ++ if $count % $cap;
+    map{ exec "$0 $cap $_" unless fork }1 .. $len;
+    exit;
+}
+
+@node = splice @node, $cap * ( $id - 1 ), $cap;
+map{ chomp  $_}my @succ = `cat $RealBin/RE/Success 2>/dev/null`;
+my %succ = map{ $_ => 1 }@succ;
+
+my %fail = (
+    'Network unreachable' => 'Fail.NetworkUnreachable',
+    'Connection timed out' => 'Fail.ConnectionTimedOut',
+    'Permission denied' => 'Fail.PermissionDenied',
+    'Connection refused' => 'Fail.ConnectionRefused',
+);
+
+$count = scalar @node;
+for my $node ( @node )
+{
+    $i ++;
+    print '#' x 75, " $id => $i/$count\n";
+    print "node :$node\n";
+    if( $succ{$node} )
+    {
+        print "node is successed! skip.\n";
+        next;
+    }
+    my $check = `sshpass -p "$conf{password}" ssh $conf{user}\@$node "echo OOKK"`;
+    print $check;
+    if( $check =~ /OOKK/ )
+    {
+        print "node is ok! skip!\n";
+        system "echo $node >> $RealBin/RE/Success";
+        next;
+    }
+    my $x = `$conf{ssh} $node  "echo '$conf{password}' | sudo passwd --stdin $conf{user}" 2>&1`;
+    print "$x\n";
+    map{
+        if( $x =~ /$_/ )
+        {
+            system "echo $node >> $RealBin/RE/$fail{$_}";
+            next;
+        }
+    }keys %fail;
+    my $c = `sshpass -p "$conf{password}" ssh $conf{user}\@$node "echo OOKK"`;
+    print $c;
+    system sprintf "echo $node >> $RealBin/RE/%s", $c =~ /OOKK/ ? 'Success' : 'Fail';
+}
+
