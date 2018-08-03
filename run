@@ -61,7 +61,7 @@ for my $node ( @node )
         system "echo $node >> $RealBin/RE/Success";
         next;
     }
-    my $x = `$conf{ssh} $node  "echo '$conf{password}' | sudo passwd --stdin $conf{user}" 2>&1`;
+    my $x = `$conf{ssh} $node  "echo '$conf{user}:$conf{password}' | sudo chpasswd" 2>&1`;
     print "$x\n";
     map{
         if( $x =~ /$_/ )
